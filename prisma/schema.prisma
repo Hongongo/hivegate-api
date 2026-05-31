@@ -1,0 +1,415 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  COMMUNITY_ADMIN
+  RESIDENT_OWNER
+  RESIDENT_TENANT
+  RESIDENT_MEMBER
+  GUARD
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum HomeResidentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum InvitationStatus {
+  PENDING
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+}
+
+enum InvitationType {
+  GUEST
+  PROVIDER
+  DELIVERY
+  SERVICE
+  OTHER
+}
+
+enum QrTokenStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+}
+
+enum AccessDirection {
+  ENTRY
+  EXIT
+}
+
+enum AccessMethod {
+  QR
+  MANUAL
+}
+
+enum AccessResult {
+  ALLOWED
+  DENIED
+}
+
+enum GuardShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum DeviceType {
+  GATE
+  QR_SCANNER
+  MOBILE_DEVICE
+  OTHER
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+}
+
+enum GateCommandType {
+  OPEN
+  CLOSE
+  TEST
+}
+
+enum GateCommandStatus {
+  PENDING
+  SENT
+  SUCCESS
+  FAILED
+  SIMULATED
+}
+
+enum NotificationType {
+  INVITATION_CREATED
+  ACCESS_GRANTED
+  ACCESS_DENIED
+  GATE_COMMAND
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+model Community {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  homes             Home[]
+  users             User[]
+  invitations       Invitation[]
+  accessLogs        AccessLog[]
+  guardShifts       GuardShift[]
+  devices           Device[]
+  gateCommands      GateCommand[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  communitySettings CommunitySetting[]
+
+  @@map("communities")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  communityId  String?
+  email        String     @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  community Community? @relation(fields: [communityId], references: [id])
+
+  homesOwnedOrLinked HomeResident[]
+  invitationsCreated Invitation[]   @relation("InvitationCreatedBy")
+  accessLogsAsGuard  AccessLog[]    @relation("AccessLogGuard")
+  guardShifts        GuardShift[]
+  auditLogs          AuditLog[]     @relation("AuditLogActor")
+  notifications      Notification[]
+
+  @@index([communityId])
+  @@index([role])
+  @@map("users")
+}
+
+model Home {
+  id          String   @id @default(cuid())
+  communityId String
+  code        String
+  street      String?
+  number      String?
+  block       String?
+  lot         String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+
+  residents   HomeResident[]
+  invitations Invitation[]
+  accessLogs  AccessLog[]
+
+  @@unique([communityId, code])
+  @@index([communityId])
+  @@map("homes")
+}
+
+model HomeResident {
+  id        String             @id @default(cuid())
+  homeId    String
+  userId    String
+  status    HomeResidentStatus @default(ACTIVE)
+  isPrimary Boolean            @default(false)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  home Home @relation(fields: [homeId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([homeId, userId])
+  @@index([homeId])
+  @@index([userId])
+  @@map("home_residents")
+}
+
+model Invitation {
+  id             String           @id @default(cuid())
+  communityId    String
+  homeId         String
+  createdById    String
+  type           InvitationType
+  status         InvitationStatus @default(PENDING)
+  visitorName    String
+  visitorPhone   String?
+  visitorCompany String?
+  notes          String?
+  validFrom      DateTime
+  validUntil     DateTime
+  maxUses        Int              @default(1)
+  usedCount      Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+  home      Home      @relation(fields: [homeId], references: [id])
+  createdBy User      @relation("InvitationCreatedBy", fields: [createdById], references: [id])
+
+  qrTokens   QrToken[]
+  accessLogs AccessLog[]
+
+  @@index([communityId])
+  @@index([homeId])
+  @@index([createdById])
+  @@index([status])
+  @@map("invitations")
+}
+
+model QrToken {
+  id           String        @id @default(cuid())
+  invitationId String
+  tokenHash    String        @unique
+  status       QrTokenStatus @default(ACTIVE)
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  invitation Invitation @relation(fields: [invitationId], references: [id])
+
+  accessLogs AccessLog[]
+
+  @@index([invitationId])
+  @@index([status])
+  @@map("qr_tokens")
+}
+
+model AccessLog {
+  id           String          @id @default(cuid())
+  communityId  String
+  homeId       String?
+  invitationId String?
+  qrTokenId    String?
+  guardId      String?
+  direction    AccessDirection
+  method       AccessMethod
+  result       AccessResult
+  visitorName  String?
+  notes        String?
+  deniedReason String?
+  occurredAt   DateTime        @default(now())
+  createdAt    DateTime        @default(now())
+
+  community  Community   @relation(fields: [communityId], references: [id])
+  home       Home?       @relation(fields: [homeId], references: [id])
+  invitation Invitation? @relation(fields: [invitationId], references: [id])
+  qrToken    QrToken?    @relation(fields: [qrTokenId], references: [id])
+  guard      User?       @relation("AccessLogGuard", fields: [guardId], references: [id])
+
+  gateCommands GateCommand[]
+
+  @@index([communityId])
+  @@index([homeId])
+  @@index([invitationId])
+  @@index([qrTokenId])
+  @@index([guardId])
+  @@index([occurredAt])
+  @@map("access_logs")
+}
+
+model GuardShift {
+  id          String           @id @default(cuid())
+  communityId String
+  guardId     String
+  status      GuardShiftStatus @default(OPEN)
+  startedAt   DateTime         @default(now())
+  endedAt     DateTime?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+  guard     User      @relation(fields: [guardId], references: [id])
+
+  @@index([communityId])
+  @@index([guardId])
+  @@index([status])
+  @@map("guard_shifts")
+}
+
+model Device {
+  id          String       @id @default(cuid())
+  communityId String
+  name        String
+  type        DeviceType
+  status      DeviceStatus @default(ACTIVE)
+  identifier  String?
+  location    String?
+  isSimulated Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+
+  gateCommands GateCommand[]
+
+  @@index([communityId])
+  @@index([type])
+  @@map("devices")
+}
+
+model GateCommand {
+  id          String            @id @default(cuid())
+  communityId String
+  deviceId    String?
+  accessLogId String?
+  type        GateCommandType
+  status      GateCommandStatus @default(PENDING)
+  payload     Json?
+  response    Json?
+  requestedAt DateTime          @default(now())
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  community Community  @relation(fields: [communityId], references: [id])
+  device    Device?    @relation(fields: [deviceId], references: [id])
+  accessLog AccessLog? @relation(fields: [accessLogId], references: [id])
+
+  @@index([communityId])
+  @@index([deviceId])
+  @@index([accessLogId])
+  @@index([status])
+  @@map("gate_commands")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  communityId String?
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  community Community? @relation(fields: [communityId], references: [id])
+  actor     User?      @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([communityId])
+  @@index([actorId])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  communityId String
+  userId      String?
+  type        NotificationType
+  status      NotificationStatus @default(PENDING)
+  title       String
+  message     String
+  payload     Json?
+  readAt      DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([communityId])
+  @@index([userId])
+  @@index([status])
+  @@map("notifications")
+}
+
+model CommunitySetting {
+  id          String   @id @default(cuid())
+  communityId String
+  key         String
+  value       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id])
+
+  @@unique([communityId, key])
+  @@index([communityId])
+  @@map("community_settings")
+}

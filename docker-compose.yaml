@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hivegate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hivegate_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - hivegate_pg_data:/var/lib/postgresql/data
+
+volumes:
+  hivegate_pg_data:
