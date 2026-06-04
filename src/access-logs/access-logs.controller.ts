@@ -15,6 +15,7 @@ import type { JwtPayload } from '../common/types/jwt-payload.type';
 import { UserRole } from '../generated/prisma/client';
 import { AccessLogsService } from './access-logs.service';
 import { ValidateQrDto } from './dto/validate-qr.dto';
+import { RegisterExitDto } from './dto/register-exit.dto';
 
 @Controller('access-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +29,16 @@ export class AccessLogsController {
     @Body() dto: ValidateQrDto,
   ) {
     return this.accessLogsService.validateQr(currentUser, dto);
+  }
+  
+  @Post(':id/exit')
+  @Roles(UserRole.GUARD, UserRole.COMMUNITY_ADMIN)
+  registerExit(
+    @Param('id') id: string,
+    @CurrentUser() currentUser: JwtPayload,
+   @Body() dto: RegisterExitDto,
+  ) {
+    return this.accessLogsService.registerExit(currentUser, id, dto);
   }
 
   @Get()
@@ -44,4 +55,6 @@ export class AccessLogsController {
   ) {
     return this.accessLogsService.findOne(id, currentUser);
   }
+
+ 
 }
