@@ -22,10 +22,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { RegisterExitDto } from './dto/register-exit.dto';
+import { ManualEntryDto } from './dto/manual-entry.dto';
 
 @Injectable()
 export class AccessLogsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async validateQr(currentUser: JwtPayload, dto: ValidateQrDto) {
     if (
@@ -279,153 +280,277 @@ export class AccessLogsService {
     };
   }
 
-  async registerExit(
-  currentUser: JwtPayload,
-  entryLogId: string,
-  dto: RegisterExitDto,
-) {
-  if (
-    currentUser.role !== UserRole.GUARD &&
-    currentUser.role !== UserRole.COMMUNITY_ADMIN
-  ) {
-    throw new ForbiddenException('Only guards can register exits');
-  }
+  async manualEntry(currentUser: JwtPayload, dto: ManualEntryDto) {
+    if (
+      currentUser.role !== UserRole.GUARD &&
+      currentUser.role !== UserRole.COMMUNITY_ADMIN
+    ) {
+      throw new ForbiddenException('Only guards can register manual entries');
+    }
 
-  if (!currentUser.communityId) {
-    throw new ForbiddenException('User has no community assigned');
-  }
+    if (!currentUser.communityId) {
+      throw new ForbiddenException('User has no community assigned');
+    }
 
-  const entryLog = await this.prisma.accessLog.findUnique({
-    where: {
-      id: entryLogId,
-    },
-  });
-
-  if (!entryLog) {
-    throw new NotFoundException('Entry access log not found');
-  }
-
-  if (entryLog.communityId !== currentUser.communityId) {
-    throw new ForbiddenException('Access log belongs to another community');
-  }
-
-  if (entryLog.direction !== AccessDirection.ENTRY) {
-    throw new BadRequestException('Access log is not an entry log');
-  }
-
-  if (entryLog.result !== AccessResult.ALLOWED) {
-    throw new BadRequestException('Only allowed entries can be closed');
-  }
-
-  if (!entryLog.invitationId || !entryLog.qrTokenId) {
-    throw new BadRequestException(
-      'Only QR-based entries can be closed for now',
-    );
-  }
-
-  const existingExit = await this.prisma.accessLog.findFirst({
-    where: {
-      invitationId: entryLog.invitationId,
-      qrTokenId: entryLog.qrTokenId,
-      direction: AccessDirection.EXIT,
-      result: AccessResult.ALLOWED,
-    },
-  });
-
-  if (existingExit) {
-    throw new BadRequestException('Exit already registered for this entry');
-  }
-
-  const now = new Date();
-
-  const result = await this.prisma.$transaction(async (tx) => {
-    const exitLog = await tx.accessLog.create({
-      data: {
-        communityId: entryLog.communityId,
-        homeId: entryLog.homeId,
-        invitationId: entryLog.invitationId,
-        qrTokenId: entryLog.qrTokenId,
-        guardId: currentUser.sub,
-        direction: AccessDirection.EXIT,
-        method: AccessMethod.MANUAL,
-        result: AccessResult.ALLOWED,
-        visitorName: entryLog.visitorName,
-        notes: dto.notes ?? 'Manual exit registered by guard',
-      },
-      select: this.getAccessLogSelect(),
-    });
-
-    const gateDevice = await tx.device.findFirst({
+    const home = await this.prisma.home.findUnique({
       where: {
-        communityId: entryLog.communityId,
-        type: DeviceType.GATE,
-        status: DeviceStatus.ACTIVE,
-      },
-      orderBy: {
-        createdAt: 'asc',
+        id: dto.homeId,
       },
     });
 
-    const gateCommand = await tx.gateCommand.create({
-      data: {
-        communityId: entryLog.communityId,
-        deviceId: gateDevice?.id,
-        accessLogId: exitLog.id,
-        type: GateCommandType.OPEN,
-        status: GateCommandStatus.SIMULATED,
-        payload: {
-          reason: 'MANUAL_EXIT_REGISTERED',
-          visitorName: entryLog.visitorName,
-          homeId: entryLog.homeId,
-          simulated: true,
-        },
-        response: {
-          message: 'Exit gate opening simulated',
-        },
-        completedAt: now,
-      },
-      select: {
-        id: true,
-        deviceId: true,
-        accessLogId: true,
-        type: true,
-        status: true,
-        payload: true,
-        response: true,
-        requestedAt: true,
-        completedAt: true,
-      },
-    });
+    if (!home) {
+      throw new NotFoundException('Home not found');
+    }
 
-    await tx.auditLog.create({
-      data: {
-        communityId: entryLog.communityId,
-        actorId: currentUser.sub,
-        action: 'ACCESS_EXIT_REGISTERED',
-        entityType: 'AccessLog',
-        entityId: exitLog.id,
-        metadata: {
-          entryLogId: entryLog.id,
-          invitationId: entryLog.invitationId,
-          qrTokenId: entryLog.qrTokenId,
-          gateCommandId: gateCommand.id,
-          visitorName: entryLog.visitorName,
+    if (home.communityId !== currentUser.communityId) {
+      throw new ForbiddenException('Home belongs to another community');
+    }
+
+    if (!home.isActive) {
+      throw new BadRequestException('Home is inactive');
+    }
+
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const accessLog = await tx.accessLog.create({
+        data: {
+          communityId: home.communityId,
+          homeId: home.id,
+          guardId: currentUser.sub,
+          direction: AccessDirection.ENTRY,
+          method: AccessMethod.MANUAL,
+          result: AccessResult.ALLOWED,
+          visitorName: dto.visitorName,
+          notes:
+            dto.notes ??
+            'Manual entry registered by guard without QR invitation',
         },
-      },
+        select: this.getAccessLogSelect(),
+      });
+
+      const gateDevice = await tx.device.findFirst({
+        where: {
+          communityId: home.communityId,
+          type: DeviceType.GATE,
+          status: DeviceStatus.ACTIVE,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      });
+
+      const gateCommand = await tx.gateCommand.create({
+        data: {
+          communityId: home.communityId,
+          deviceId: gateDevice?.id,
+          accessLogId: accessLog.id,
+          type: GateCommandType.OPEN,
+          status: GateCommandStatus.SIMULATED,
+          payload: {
+            reason: 'MANUAL_ENTRY_AUTHORIZED',
+            visitorName: dto.visitorName,
+            visitorPhone: dto.visitorPhone,
+            visitorCompany: dto.visitorCompany,
+            homeId: home.id,
+            simulated: true,
+          },
+          response: {
+            message: 'Manual entry gate opening simulated',
+          },
+          completedAt: now,
+        },
+        select: {
+          id: true,
+          deviceId: true,
+          accessLogId: true,
+          type: true,
+          status: true,
+          payload: true,
+          response: true,
+          requestedAt: true,
+          completedAt: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          communityId: home.communityId,
+          actorId: currentUser.sub,
+          action: 'MANUAL_ENTRY_AUTHORIZED',
+          entityType: 'AccessLog',
+          entityId: accessLog.id,
+          metadata: {
+            homeId: home.id,
+            visitorName: dto.visitorName,
+            visitorPhone: dto.visitorPhone,
+            visitorCompany: dto.visitorCompany,
+            gateCommandId: gateCommand.id,
+            reason: dto.notes,
+          },
+        },
+      });
+
+      return {
+        accessLog,
+        gateCommand,
+      };
     });
 
     return {
-      exitLog,
-      gateCommand,
+      result: 'ALLOWED',
+      message: 'Manual entry registered successfully. Gate opening simulated.',
+      ...result,
     };
-  });
+  }
+  
+  async registerExit(
+    currentUser: JwtPayload,
+    entryLogId: string,
+    dto: RegisterExitDto,
+  ) {
+    if (
+      currentUser.role !== UserRole.GUARD &&
+      currentUser.role !== UserRole.COMMUNITY_ADMIN
+    ) {
+      throw new ForbiddenException('Only guards can register exits');
+    }
 
-  return {
-    result: 'ALLOWED',
-    message: 'Exit registered successfully. Gate opening simulated.',
-    ...result,
-  };
-}
+    if (!currentUser.communityId) {
+      throw new ForbiddenException('User has no community assigned');
+    }
+
+    const entryLog = await this.prisma.accessLog.findUnique({
+      where: {
+        id: entryLogId,
+      },
+    });
+
+    if (!entryLog) {
+      throw new NotFoundException('Entry access log not found');
+    }
+
+    if (entryLog.communityId !== currentUser.communityId) {
+      throw new ForbiddenException('Access log belongs to another community');
+    }
+
+    if (entryLog.direction !== AccessDirection.ENTRY) {
+      throw new BadRequestException('Access log is not an entry log');
+    }
+
+    if (entryLog.result !== AccessResult.ALLOWED) {
+      throw new BadRequestException('Only allowed entries can be closed');
+    }
+
+    if (!entryLog.invitationId || !entryLog.qrTokenId) {
+      throw new BadRequestException(
+        'Only QR-based entries can be closed for now',
+      );
+    }
+
+    const existingExit = await this.prisma.accessLog.findFirst({
+      where: {
+        invitationId: entryLog.invitationId,
+        qrTokenId: entryLog.qrTokenId,
+        direction: AccessDirection.EXIT,
+        result: AccessResult.ALLOWED,
+      },
+    });
+
+    if (existingExit) {
+      throw new BadRequestException('Exit already registered for this entry');
+    }
+
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const exitLog = await tx.accessLog.create({
+        data: {
+          communityId: entryLog.communityId,
+          homeId: entryLog.homeId,
+          invitationId: entryLog.invitationId,
+          qrTokenId: entryLog.qrTokenId,
+          guardId: currentUser.sub,
+          direction: AccessDirection.EXIT,
+          method: AccessMethod.MANUAL,
+          result: AccessResult.ALLOWED,
+          visitorName: entryLog.visitorName,
+          notes: dto.notes ?? 'Manual exit registered by guard',
+        },
+        select: this.getAccessLogSelect(),
+      });
+
+      const gateDevice = await tx.device.findFirst({
+        where: {
+          communityId: entryLog.communityId,
+          type: DeviceType.GATE,
+          status: DeviceStatus.ACTIVE,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      });
+
+      const gateCommand = await tx.gateCommand.create({
+        data: {
+          communityId: entryLog.communityId,
+          deviceId: gateDevice?.id,
+          accessLogId: exitLog.id,
+          type: GateCommandType.OPEN,
+          status: GateCommandStatus.SIMULATED,
+          payload: {
+            reason: 'MANUAL_EXIT_REGISTERED',
+            visitorName: entryLog.visitorName,
+            homeId: entryLog.homeId,
+            simulated: true,
+          },
+          response: {
+            message: 'Exit gate opening simulated',
+          },
+          completedAt: now,
+        },
+        select: {
+          id: true,
+          deviceId: true,
+          accessLogId: true,
+          type: true,
+          status: true,
+          payload: true,
+          response: true,
+          requestedAt: true,
+          completedAt: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          communityId: entryLog.communityId,
+          actorId: currentUser.sub,
+          action: 'ACCESS_EXIT_REGISTERED',
+          entityType: 'AccessLog',
+          entityId: exitLog.id,
+          metadata: {
+            entryLogId: entryLog.id,
+            invitationId: entryLog.invitationId,
+            qrTokenId: entryLog.qrTokenId,
+            gateCommandId: gateCommand.id,
+            visitorName: entryLog.visitorName,
+          },
+        },
+      });
+
+      return {
+        exitLog,
+        gateCommand,
+      };
+    });
+
+    return {
+      result: 'ALLOWED',
+      message: 'Exit registered successfully. Gate opening simulated.',
+      ...result,
+    };
+  }
 
   async findAll(currentUser: JwtPayload) {
     if (currentUser.role === UserRole.SUPER_ADMIN) {

@@ -16,11 +16,12 @@ import { UserRole } from '../generated/prisma/client';
 import { AccessLogsService } from './access-logs.service';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { RegisterExitDto } from './dto/register-exit.dto';
+import { ManualEntryDto } from './dto/manual-entry.dto';
 
 @Controller('access-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AccessLogsController {
-  constructor(private readonly accessLogsService: AccessLogsService) {}
+  constructor(private readonly accessLogsService: AccessLogsService) { }
 
   @Post('validate-qr')
   @Roles(UserRole.GUARD, UserRole.COMMUNITY_ADMIN)
@@ -30,13 +31,22 @@ export class AccessLogsController {
   ) {
     return this.accessLogsService.validateQr(currentUser, dto);
   }
-  
+
+  @Post('manual-entry')
+  @Roles(UserRole.GUARD, UserRole.COMMUNITY_ADMIN)
+  manualEntry(
+    @CurrentUser() currentUser: JwtPayload,
+    @Body() dto: ManualEntryDto,
+  ) {
+    return this.accessLogsService.manualEntry(currentUser, dto);
+  }
+
   @Post(':id/exit')
   @Roles(UserRole.GUARD, UserRole.COMMUNITY_ADMIN)
   registerExit(
     @Param('id') id: string,
     @CurrentUser() currentUser: JwtPayload,
-   @Body() dto: RegisterExitDto,
+    @Body() dto: RegisterExitDto,
   ) {
     return this.accessLogsService.registerExit(currentUser, id, dto);
   }
@@ -56,5 +66,5 @@ export class AccessLogsController {
     return this.accessLogsService.findOne(id, currentUser);
   }
 
- 
+
 }
