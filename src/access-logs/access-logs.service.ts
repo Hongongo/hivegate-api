@@ -403,7 +403,7 @@ export class AccessLogsService {
       ...result,
     };
   }
-  
+   
   async registerExit(
     currentUser: JwtPayload,
     entryLogId: string,

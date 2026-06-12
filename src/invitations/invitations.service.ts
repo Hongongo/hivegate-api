@@ -25,21 +25,6 @@ export class InvitationsService {
       throw new ForbiddenException('Only residents can create invitations');
     }
 
-    const validFrom = new Date(dto.validFrom);
-    const validUntil = new Date(dto.validUntil);
-
-    if (Number.isNaN(validFrom.getTime())) {
-      throw new BadRequestException('Invalid validFrom date');
-    }
-
-    if (Number.isNaN(validUntil.getTime())) {
-      throw new BadRequestException('Invalid validUntil date');
-    }
-
-    if (validUntil <= validFrom) {
-      throw new BadRequestException('validUntil must be after validFrom');
-    }
-
     const homeResident = await this.prisma.homeResident.findFirst({
       where: {
         homeId: dto.homeId,
@@ -51,6 +36,7 @@ export class InvitationsService {
       },
     });
 
+
     if (!homeResident) {
       throw new ForbiddenException('You are not linked to this home');
     }
@@ -58,6 +44,11 @@ export class InvitationsService {
     if (!homeResident.home.isActive) {
       throw new BadRequestException('Home is inactive');
     }
+
+    const { validFrom, validUntil } = await this.resolveValidityRange(
+      dto,
+      homeResident.home.communityId,
+    );
 
     const rawToken = this.generateRawToken();
     const tokenHash = this.hashToken(rawToken);
@@ -214,6 +205,128 @@ export class InvitationsService {
     }
 
     throw new ForbiddenException('Insufficient role');
+  }
+
+  private async resolveValidityRange(
+    dto: CreateInvitationDto,
+    communityId: string,
+  ): Promise<{ validFrom: Date; validUntil: Date }> {
+    const now = new Date();
+
+    const maxMinutes = await this.getCommunityNumberSetting(
+      communityId,
+      'maxInvitationValidityMinutes',
+      10080,
+    );
+
+    if (dto.validForMinutes !== undefined) {
+      if (dto.validFrom || dto.validUntil) {
+        throw new BadRequestException(
+          'Use either validForMinutes or validFrom/validUntil, not both',
+        );
+      }
+
+      if (dto.validForMinutes > maxMinutes) {
+        throw new BadRequestException(
+          `validForMinutes cannot exceed ${maxMinutes} minutes`,
+        );
+      }
+
+      return {
+        validFrom: now,
+        validUntil: new Date(now.getTime() + dto.validForMinutes * 60 * 1000),
+      };
+    }
+
+    if (dto.validFrom || dto.validUntil) {
+      if (!dto.validFrom || !dto.validUntil) {
+        throw new BadRequestException(
+          'Both validFrom and validUntil are required for scheduled invitations',
+        );
+      }
+
+      const validFrom = new Date(dto.validFrom);
+      const validUntil = new Date(dto.validUntil);
+
+      if (Number.isNaN(validFrom.getTime())) {
+        throw new BadRequestException('Invalid validFrom date');
+      }
+
+      if (Number.isNaN(validUntil.getTime())) {
+        throw new BadRequestException('Invalid validUntil date');
+      }
+
+      if (validUntil <= validFrom) {
+        throw new BadRequestException('validUntil must be after validFrom');
+      }
+
+      if (validUntil <= now) {
+        throw new BadRequestException('validUntil must be in the future');
+      }
+
+      const durationMinutes = Math.ceil(
+        (validUntil.getTime() - validFrom.getTime()) / 60_000,
+      );
+
+      if (durationMinutes < 5) {
+        throw new BadRequestException(
+          'Invitation validity must be at least 5 minutes',
+        );
+      }
+
+      if (durationMinutes > maxMinutes) {
+        throw new BadRequestException(
+          `Invitation validity cannot exceed ${maxMinutes} minutes`,
+        );
+      }
+
+      return {
+        validFrom,
+        validUntil,
+      };
+    }
+
+    const defaultMinutesFromSettings = await this.getCommunityNumberSetting(
+      communityId,
+      'defaultInvitationValidityMinutes',
+      1440,
+    );
+
+    const defaultMinutes = Math.min(
+      Math.max(defaultMinutesFromSettings, 5),
+      maxMinutes,
+    );
+
+    return {
+      validFrom: now,
+      validUntil: new Date(now.getTime() + defaultMinutes * 60 * 1000),
+    };
+  }
+
+  private async getCommunityNumberSetting(
+    communityId: string,
+    key: string,
+    fallback: number,
+  ): Promise<number> {
+    const setting = await this.prisma.communitySetting.findUnique({
+      where: {
+        communityId_key: {
+          communityId,
+          key,
+        },
+      },
+      select: {
+        value: true,
+      },
+    });
+
+    const value = setting?.value;
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return value;
   }
 
   private generateRawToken(): string {
