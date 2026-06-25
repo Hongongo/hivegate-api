@@ -1,8 +1,11 @@
 import {
   IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -31,9 +34,27 @@ export class CreateInvitationDto {
   @IsString()
   notes?: string;
 
-  @IsDateString()
-  validFrom!: string;
+  /**
+   * Invitación rápida.
+   * Ejemplo: validForMinutes = 120
+   * validFrom = ahora
+   * validUntil = ahora + 120 minutos
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(10080)
+  validForMinutes?: number;
 
+  /**
+   * Invitación programada.
+   * Deben venir ambos: validFrom y validUntil.
+   */
+  @IsOptional()
   @IsDateString()
-  validUntil!: string;
+  validFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  validUntil?: string;
 }
