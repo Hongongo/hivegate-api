@@ -442,16 +442,9 @@ export class AccessLogsService {
       throw new BadRequestException('Only allowed entries can be closed');
     }
 
-    if (!entryLog.invitationId || !entryLog.qrTokenId) {
-      throw new BadRequestException(
-        'Only QR-based entries can be closed for now',
-      );
-    }
-
     const existingExit = await this.prisma.accessLog.findFirst({
       where: {
-        invitationId: entryLog.invitationId,
-        qrTokenId: entryLog.qrTokenId,
+        entryLogId: entryLog.id,
         direction: AccessDirection.EXIT,
         result: AccessResult.ALLOWED,
       },
@@ -471,6 +464,7 @@ export class AccessLogsService {
           invitationId: entryLog.invitationId,
           qrTokenId: entryLog.qrTokenId,
           guardId: currentUser.sub,
+          entryLogId: entryLog.id,
           direction: AccessDirection.EXIT,
           method: AccessMethod.MANUAL,
           result: AccessResult.ALLOWED,
@@ -502,6 +496,7 @@ export class AccessLogsService {
             reason: 'MANUAL_EXIT_REGISTERED',
             visitorName: entryLog.visitorName,
             homeId: entryLog.homeId,
+            entryLogId: entryLog.id,
             simulated: true,
           },
           response: {
@@ -535,6 +530,7 @@ export class AccessLogsService {
             qrTokenId: entryLog.qrTokenId,
             gateCommandId: gateCommand.id,
             visitorName: entryLog.visitorName,
+            entryMethod: entryLog.method,
           },
         },
       });
@@ -655,6 +651,7 @@ export class AccessLogsService {
       invitationId: true,
       qrTokenId: true,
       guardId: true,
+      entryLogId: true,
       direction: true,
       method: true,
       result: true,
@@ -697,6 +694,26 @@ export class AccessLogsService {
           firstName: true,
           lastName: true,
           role: true,
+        },
+      },
+      entryLog: {
+        select: {
+          id: true,
+          direction: true,
+          method: true,
+          result: true,
+          visitorName: true,
+          occurredAt: true,
+        },
+      },
+      exitLogs: {
+        select: {
+          id: true,
+          direction: true,
+          method: true,
+          result: true,
+          visitorName: true,
+          occurredAt: true,
         },
       },
       gateCommands: {
