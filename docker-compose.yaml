@@ -4,8 +4,8 @@ services:
     container_name: hivegate-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: hivegate
+      POSTGRES_PASSWORD: hivegate_dev
       POSTGRES_DB: hivegate_db
     ports:
       - "5432:5432"
