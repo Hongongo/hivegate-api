@@ -15,6 +15,7 @@ import {
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { CancelInvitationDto } from './dto/cancel-invitation.dto';
 
 @Injectable()
 export class InvitationsService {
@@ -207,6 +208,99 @@ export class InvitationsService {
     throw new ForbiddenException('Insufficient role');
   }
 
+  async cancel(
+    id: string,
+    currentUser: JwtPayload,
+    dto: CancelInvitationDto,
+  ) {
+    const invitation = await this.prisma.invitation.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        qrTokens: true,
+      },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found');
+    }
+
+    if (currentUser.role === UserRole.COMMUNITY_ADMIN) {
+      if (!currentUser.communityId) {
+        throw new ForbiddenException('User has no community assigned');
+      }
+
+      if (invitation.communityId !== currentUser.communityId) {
+        throw new ForbiddenException(
+          'Invitation belongs to another community',
+        );
+      }
+    } else if (this.isResidentRole(currentUser.role)) {
+      if (invitation.createdById !== currentUser.sub) {
+        throw new ForbiddenException('You cannot cancel this invitation');
+      }
+    } else if (currentUser.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Insufficient role');
+    }
+
+    if (invitation.status === InvitationStatus.USED) {
+      throw new BadRequestException('Used invitations cannot be cancelled');
+    }
+
+    if (invitation.status === InvitationStatus.CANCELLED) {
+      throw new BadRequestException('Invitation is already cancelled');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedInvitation = await tx.invitation.update({
+        where: {
+          id: invitation.id,
+        },
+        data: {
+          status: InvitationStatus.CANCELLED,
+        },
+        select: this.getInvitationSelect(),
+      });
+
+      const cancelledQrTokens = await tx.qrToken.updateMany({
+        where: {
+          invitationId: invitation.id,
+          status: QrTokenStatus.ACTIVE,
+        },
+        data: {
+          status: QrTokenStatus.CANCELLED,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          communityId: invitation.communityId,
+          actorId: currentUser.sub,
+          action: 'INVITATION_CANCELLED',
+          entityType: 'Invitation',
+          entityId: invitation.id,
+          metadata: {
+            reason: dto.reason,
+            cancelledQrTokens: cancelledQrTokens.count,
+            visitorName: invitation.visitorName,
+            homeId: invitation.homeId,
+          },
+        },
+      });
+
+      return {
+        invitation: updatedInvitation,
+        cancelledQrTokens: cancelledQrTokens.count,
+      };
+    });
+
+    return {
+      message: 'Invitation cancelled successfully',
+      ...result,
+    };
+  }
+  
   private async resolveValidityRange(
     dto: CreateInvitationDto,
     communityId: string,

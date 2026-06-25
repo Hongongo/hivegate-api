@@ -8,6 +8,7 @@ import type { JwtPayload } from '../common/types/jwt-payload.type';
 import { UserRole } from '../generated/prisma/client';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { InvitationsService } from './invitations.service';
+import { CancelInvitationDto } from './dto/cancel-invitation.dto';
 
 @Controller('invitations')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,6 +42,22 @@ export class InvitationsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.COMMUNITY_ADMIN, UserRole.GUARD)
   findAll(@CurrentUser() currentUser: JwtPayload) {
     return this.invitationsService.findAll(currentUser);
+  }
+
+  @Post(':id/cancel')
+  @Roles(
+    UserRole.SUPER_ADMIN,
+    UserRole.COMMUNITY_ADMIN,
+    UserRole.RESIDENT_OWNER,
+    UserRole.RESIDENT_TENANT,
+    UserRole.RESIDENT_MEMBER,
+  )
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() currentUser: JwtPayload,
+    @Body() dto: CancelInvitationDto,
+  ) {
+    return this.invitationsService.cancel(id, currentUser, dto);
   }
 
   @Get(':id')
