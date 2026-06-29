@@ -23,6 +23,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { RegisterExitDto } from './dto/register-exit.dto';
 import { ManualEntryDto } from './dto/manual-entry.dto';
+import type { Prisma } from '../generated/prisma/client';
+import { AccessLogQueryDto } from './dto/access-log-query.dto';
 
 @Injectable()
 export class AccessLogsService {
@@ -548,36 +550,35 @@ export class AccessLogsService {
     };
   }
 
-  async findAll(currentUser: JwtPayload) {
-    if (currentUser.role === UserRole.SUPER_ADMIN) {
-      return this.prisma.accessLog.findMany({
+  async findAll(currentUser: JwtPayload, query: AccessLogQueryDto) {
+    const where = this.buildAccessLogWhere(currentUser, query);
+
+    const limit = query.limit ?? 50;
+    const offset = query.offset ?? 0;
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.accessLog.findMany({
+        where,
         orderBy: {
           occurredAt: 'desc',
         },
+        skip: offset,
+        take: limit,
         select: this.getAccessLogSelect(),
-      });
-    }
+      }),
+      this.prisma.accessLog.count({
+        where,
+      }),
+    ]);
 
-    if (
-      currentUser.role === UserRole.COMMUNITY_ADMIN ||
-      currentUser.role === UserRole.GUARD
-    ) {
-      if (!currentUser.communityId) {
-        throw new ForbiddenException('User has no community assigned');
-      }
-
-      return this.prisma.accessLog.findMany({
-        where: {
-          communityId: currentUser.communityId,
-        },
-        orderBy: {
-          occurredAt: 'desc',
-        },
-        select: this.getAccessLogSelect(),
-      });
-    }
-
-    throw new ForbiddenException('Insufficient role');
+    return {
+      data: items,
+      meta: {
+        total,
+        limit,
+        offset,
+      },
+    };
   }
 
   async findOne(id: string, currentUser: JwtPayload) {
@@ -637,6 +638,69 @@ export class AccessLogsService {
         deniedReason: params.deniedReason,
       },
     });
+  }
+
+  private buildAccessLogWhere(
+    currentUser: JwtPayload,
+    query: AccessLogQueryDto,
+  ): Prisma.AccessLogWhereInput {
+    const where: Prisma.AccessLogWhereInput = {};
+
+    if (currentUser.role === UserRole.SUPER_ADMIN) {
+      // SUPER_ADMIN can query all communities.
+    } else if (
+      currentUser.role === UserRole.COMMUNITY_ADMIN ||
+      currentUser.role === UserRole.GUARD
+    ) {
+      if (!currentUser.communityId) {
+        throw new ForbiddenException('User has no community assigned');
+      }
+
+      where.communityId = currentUser.communityId;
+    } else {
+      throw new ForbiddenException('Insufficient role');
+    }
+
+    if (query.direction) {
+      where.direction = query.direction;
+    }
+
+    if (query.method) {
+      where.method = query.method;
+    }
+
+    if (query.result) {
+      where.result = query.result;
+    }
+
+    if (query.homeId) {
+      where.homeId = query.homeId;
+    }
+
+    if (query.guardId) {
+      where.guardId = query.guardId;
+    }
+
+    if (query.visitorName) {
+      where.visitorName = {
+        contains: query.visitorName,
+        mode: 'insensitive',
+      };
+    }
+
+    if (query.from || query.to) {
+      where.occurredAt = {};
+
+      if (query.from) {
+        where.occurredAt.gte = new Date(query.from);
+      }
+
+      if (query.to) {
+        where.occurredAt.lte = new Date(query.to);
+      }
+    }
+
+    return where;
   }
 
   private hashToken(rawToken: string): string {

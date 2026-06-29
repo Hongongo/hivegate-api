@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 
@@ -17,6 +18,7 @@ import { AccessLogsService } from './access-logs.service';
 import { ValidateQrDto } from './dto/validate-qr.dto';
 import { RegisterExitDto } from './dto/register-exit.dto';
 import { ManualEntryDto } from './dto/manual-entry.dto';
+import { AccessLogQueryDto } from './dto/access-log-query.dto';
 
 @Controller('access-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -53,8 +55,11 @@ export class AccessLogsController {
 
   @Get()
   @Roles(UserRole.SUPER_ADMIN, UserRole.COMMUNITY_ADMIN, UserRole.GUARD)
-  findAll(@CurrentUser() currentUser: JwtPayload) {
-    return this.accessLogsService.findAll(currentUser);
+  findAll(
+    @CurrentUser() currentUser: JwtPayload,
+    @Query() query: AccessLogQueryDto,
+  ) {
+    return this.accessLogsService.findAll(currentUser, query);
   }
 
   @Get(':id')
