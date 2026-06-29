@@ -9,6 +9,7 @@ import { HomesModule } from './homes/homes.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
+import { CommunitySettingsModule } from './community-settings/community-settings.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { UsersModule } from './users/users.module';
     HomesModule,
     InvitationsModule,
     AccessLogsModule,
+    CommunitySettingsModule,
   ],
 })
 export class AppModule {}

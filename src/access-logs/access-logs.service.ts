@@ -312,6 +312,16 @@ export class AccessLogsService {
       throw new BadRequestException('Home is inactive');
     }
 
+    const allowManualAccess = await this.getCommunityBooleanSetting(
+      home.communityId,
+      'allowManualAccess',
+      true,
+    );
+
+    if (!allowManualAccess) {
+      throw new ForbiddenException('Manual access is disabled for this community');
+    }
+
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -701,6 +711,32 @@ export class AccessLogsService {
     }
 
     return where;
+  }
+
+  private async getCommunityBooleanSetting(
+    communityId: string,
+    key: string,
+    fallback: boolean,
+  ): Promise<boolean> {
+    const setting = await this.prisma.communitySetting.findUnique({
+      where: {
+        communityId_key: {
+          communityId,
+          key,
+        },
+      },
+      select: {
+        value: true,
+      },
+    });
+
+    const value = setting?.value;
+
+    if (typeof value !== 'boolean') {
+      return fallback;
+    }
+
+    return value;
   }
 
   private hashToken(rawToken: string): string {
